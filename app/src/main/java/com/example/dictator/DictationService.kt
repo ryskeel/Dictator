@@ -15,6 +15,7 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileOutputStream
@@ -73,17 +74,19 @@ class DictationService : Service() {
 
         val record = try {
             AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
                 bufferSize
             )
         } catch (e: Exception) {
+            Log.e(TAG, "AudioRecord constructor failed", e)
             return
         }
 
         if (record.state != AudioRecord.STATE_INITIALIZED) {
+            Log.e(TAG, "AudioRecord not initialized (state=${record.state})")
             record.release()
             return
         }
@@ -98,12 +101,34 @@ class DictationService : Service() {
 
         captureThread = Thread {
             val buffer = ByteArray(bufferSize)
+            var totalRead = 0L
+            var peak = 0
             FileOutputStream(outputFile).use { out ->
                 while (isCapturing) {
                     val read = record.read(buffer, 0, buffer.size)
-                    if (read > 0) out.write(buffer, 0, read)
+                    when {
+                        read > 0 -> {
+                            out.write(buffer, 0, read)
+                            totalRead += read
+                            var i = 0
+                            while (i < read - 1) {
+                                val lo = buffer[i].toInt() and 0xFF
+                                val hi = buffer[i + 1].toInt()
+                                val sample = (hi shl 8) or lo
+                                val signed = if (sample > 32767) sample - 65536 else sample
+                                val abs = if (signed < 0) -signed else signed
+                                if (abs > peak) peak = abs
+                                i += 2
+                            }
+                        }
+                        read < 0 -> {
+                            Log.e(TAG, "AudioRecord.read error: $read")
+                            break
+                        }
+                    }
                 }
             }
+            Log.d(TAG, "Capture finished: $totalRead bytes, peak amplitude=$peak / 32767")
         }.apply { start() }
 
         mainHandler.postDelayed({
@@ -139,6 +164,7 @@ class DictationService : Service() {
             pcm.delete()
 
             groqClient?.transcribe(wav) { text ->
+                Log.d(TAG, "Transcription result: $text")
                 wav.delete()
                 if (!text.isNullOrEmpty()) {
                     DictationAccessibilityService.instance?.pasteText(text)
@@ -247,6 +273,7 @@ class DictationService : Service() {
     }
 
     companion object {
+        private const val TAG = "Dictator"
         const val PREFS = "dictator_prefs"
         const val KEY_API_KEY = "groq_api_key"
         private const val NOTIFICATION_ID = 1
