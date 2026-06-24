@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio
+.idea/
+*.iml
+local.properties
+.DS_Store
+
+# Keystore
+*.jks
+*.keystore
+
+# Generated
+gen/
+out/
+
+# Kotlin
+*.class
