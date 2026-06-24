@@ -113,7 +113,10 @@ class DictationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_REFRESH_KEY) refreshGroqClient()
+        when (intent?.action) {
+            ACTION_REFRESH_KEY -> refreshGroqClient()
+            ACTION_TRIGGER -> onShake()
+        }
         return START_STICKY
     }
 
@@ -141,11 +144,20 @@ class DictationService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
+        val triggerIntent = Intent(this, DictationService::class.java).apply {
+            action = ACTION_TRIGGER
+        }
+        val triggerPending = PendingIntent.getService(
+            this, 1, triggerIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle("Dictator")
             .setContentText("Shake to start dictating")
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(openIntent)
+            .addAction(0, "Trigger", triggerPending)
             .setOngoing(true)
             .build()
     }
@@ -155,6 +167,7 @@ class DictationService : Service() {
         const val KEY_API_KEY = "groq_api_key"
         private const val NOTIFICATION_ID = 1
         private const val ACTION_REFRESH_KEY = "com.example.dictator.REFRESH_KEY"
+        private const val ACTION_TRIGGER = "com.example.dictator.TRIGGER"
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, DictationService::class.java))

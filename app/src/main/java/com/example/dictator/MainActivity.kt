@@ -189,6 +189,15 @@ private fun SetupScreen(
             ) {
                 Text("Save & start service")
             }
+
+            Text(
+                "Emulator testing: the foreground service notification has a " +
+                        "\"Trigger\" action — pull down the notification shade from " +
+                        "any app with a focused text field and tap it to start/stop " +
+                        "dictation without needing a real shake.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
