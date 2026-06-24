@@ -150,10 +150,13 @@ class DictationService : Service() {
     private fun pcmToWav(pcm: File): File {
         val wav = File(cacheDir, pcm.nameWithoutExtension + ".wav")
         val pcmSize = pcm.length().toInt()
-        val header = wavHeader(pcmSize, SAMPLE_RATE, channels = 1, bitsPerSample = 16)
+        val silenceBytes = SAMPLE_RATE * TRAILING_SILENCE_MS / 1000 * 2
+        val totalDataSize = pcmSize + silenceBytes
+        val header = wavHeader(totalDataSize, SAMPLE_RATE, channels = 1, bitsPerSample = 16)
         FileOutputStream(wav).use { out ->
             out.write(header)
             pcm.inputStream().use { it.copyTo(out) }
+            out.write(ByteArray(silenceBytes))
         }
         return wav
     }
@@ -250,7 +253,8 @@ class DictationService : Service() {
         private const val ACTION_REFRESH_KEY = "com.example.dictator.REFRESH_KEY"
         private const val ACTION_TRIGGER = "com.example.dictator.TRIGGER"
         private const val START_BUFFER_MS = 250L
-        private const val STOP_BUFFER_MS = 400L
+        private const val STOP_BUFFER_MS = 800L
+        private const val TRAILING_SILENCE_MS = 500
         private const val SAMPLE_RATE = 16000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
