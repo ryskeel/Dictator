@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Dictator</string>
-    <string name="accessibility_service_description">Allows Dictator to detect focused text fields and paste transcribed speech into them.</string>
+    <string name="ime_label">Dictator Voice Keyboard</string>
+    <string name="ime_subtype_label">English (US) — Voice</string>
 </resources>

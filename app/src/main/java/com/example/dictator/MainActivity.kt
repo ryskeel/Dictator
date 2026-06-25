@@ -1,11 +1,12 @@
 package com.example.dictator
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -29,7 +30,7 @@ class MainActivity : ComponentActivity() {
 
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { checkAndStartService() }
+    ) { /* status is re-read in onResume */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,95 +38,63 @@ class MainActivity : ComponentActivity() {
         setContent {
             DictatorTheme {
                 SetupScreen(
-                    onRequestRuntimePermissions = { requestRuntimePermissions() },
-                    onOpenOverlaySettings = { openOverlaySettings() },
-                    onOpenAccessibilitySettings = { openAccessibilitySettings() },
-                    onApiKeySaved = { DictationService.refreshApiKey(this); checkAndStartService() }
+                    onRequestMic = { requestMicPermission() },
+                    onOpenImeSettings = { openImeSettings() },
+                    onPickIme = { pickIme() }
                 )
             }
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        checkAndStartService()
+    private fun requestMicPermission() {
+        requestPermissionsLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
     }
 
-    private fun requestRuntimePermissions() {
-        val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        requestPermissionsLauncher.launch(perms.toTypedArray())
+    private fun openImeSettings() {
+        startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
     }
 
-    private fun openOverlaySettings() {
-        startActivity(
-            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-        )
-    }
-
-    private fun openAccessibilitySettings() {
-        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-    }
-
-    private fun checkAndStartService() {
-        val allReady = hasRecordAudio() && hasOverlay() && hasAccessibility() && hasApiKey()
-        if (allReady) DictationService.start(this)
-    }
-
-    private fun hasRecordAudio() =
-        checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-
-    private fun hasOverlay() = Settings.canDrawOverlays(this)
-
-    private fun hasAccessibility(): Boolean {
-        val enabled = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        return enabled.contains("${packageName}/${DictationAccessibilityService::class.java.name}")
-    }
-
-    private fun hasApiKey(): Boolean {
-        val key = getSharedPreferences(DictationService.PREFS, MODE_PRIVATE)
-            .getString(DictationService.KEY_API_KEY, "") ?: ""
-        return key.isNotEmpty()
+    private fun pickIme() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showInputMethodPicker()
     }
 }
 
 @Composable
 private fun SetupScreen(
-    onRequestRuntimePermissions: () -> Unit,
-    onOpenOverlaySettings: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
-    onApiKeySaved: () -> Unit
+    onRequestMic: () -> Unit,
+    onOpenImeSettings: () -> Unit,
+    onPickIme: () -> Unit
 ) {
     val context = LocalContext.current
     val prefs = remember {
-        context.getSharedPreferences(DictationService.PREFS, android.content.Context.MODE_PRIVATE)
+        context.getSharedPreferences(
+            DictatorInputMethodService.PREFS,
+            Context.MODE_PRIVATE
+        )
     }
 
     var apiKey by remember {
-        mutableStateOf(prefs.getString(DictationService.KEY_API_KEY, "") ?: "")
+        mutableStateOf(prefs.getString(DictatorInputMethodService.KEY_API_KEY, "") ?: "")
     }
     var showKey by remember { mutableStateOf(false) }
-    var hasRecordAudio by remember { mutableStateOf(false) }
-    var hasOverlay by remember { mutableStateOf(false) }
-    var hasAccessibility by remember { mutableStateOf(false) }
+    var hasMic by remember { mutableStateOf(false) }
+    var imeEnabled by remember { mutableStateOf(false) }
+    var refreshTick by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        hasRecordAudio = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+    LaunchedEffect(refreshTick) {
+        hasMic = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
-        hasOverlay = Settings.canDrawOverlays(context)
-        val enabledServices = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: ""
-        hasAccessibility = enabledServices.contains(
-            "${context.packageName}/${DictationAccessibilityService::class.java.name}"
-        )
+        imeEnabled = isImeEnabled(context)
+    }
+
+    DisposableEffect(Unit) {
+        val activity = context as? ComponentActivity
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) refreshTick++
+        }
+        activity?.lifecycle?.addObserver(observer)
+        onDispose { activity?.lifecycle?.removeObserver(observer) }
     }
 
     Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
@@ -138,27 +107,35 @@ private fun SetupScreen(
         ) {
             Text("Dictator", fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Shake your phone while a text field is focused to start dictating. " +
-                        "Tap the pill above the keyboard to stop.",
+                "Voice keyboard. Switch to it inside any app and it starts listening " +
+                        "automatically. Tap the mic to stop, transcribe, paste, and " +
+                        "switch back to your previous keyboard.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             HorizontalDivider()
 
-            PermissionRow(
-                label = "Microphone",
-                granted = hasRecordAudio,
-                onGrant = onRequestRuntimePermissions
+            StepRow(
+                step = "1",
+                label = "Microphone permission",
+                done = hasMic,
+                actionLabel = "Grant",
+                onAction = onRequestMic
             )
-            PermissionRow(
-                label = "Draw over apps",
-                granted = hasOverlay,
-                onGrant = onOpenOverlaySettings
+            StepRow(
+                step = "2",
+                label = "Enable Dictator in Languages & input",
+                done = imeEnabled,
+                actionLabel = "Open settings",
+                onAction = onOpenImeSettings
             )
-            PermissionRow(
-                label = "Accessibility service",
-                granted = hasAccessibility,
-                onGrant = onOpenAccessibilitySettings
+            StepRow(
+                step = "3",
+                label = "Open keyboard picker (use any time you want to switch to it)",
+                done = false,
+                showDone = false,
+                actionLabel = "Show picker",
+                onAction = onPickIme
             )
 
             HorizontalDivider()
@@ -181,45 +158,51 @@ private fun SetupScreen(
 
             Button(
                 onClick = {
-                    prefs.edit().putString(DictationService.KEY_API_KEY, apiKey.trim()).apply()
-                    onApiKeySaved()
+                    prefs.edit()
+                        .putString(DictatorInputMethodService.KEY_API_KEY, apiKey.trim())
+                        .apply()
                 },
                 enabled = apiKey.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Save & start service")
+                Text("Save API key")
             }
-
-            Text(
-                "Emulator testing: the foreground service notification has a " +
-                        "\"Trigger\" action — pull down the notification shade from " +
-                        "any app with a focused text field and tap it to start/stop " +
-                        "dictation without needing a real shake.",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
 
 @Composable
-private fun PermissionRow(label: String, granted: Boolean, onGrant: () -> Unit) {
+private fun StepRow(
+    step: String,
+    label: String,
+    done: Boolean,
+    showDone: Boolean = true,
+    actionLabel: String,
+    onAction: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Step $step", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(label, fontWeight = FontWeight.Medium)
-            Text(
-                if (granted) "Granted" else "Required",
-                fontSize = 12.sp,
-                color = if (granted) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error
-            )
+            if (showDone) {
+                Text(
+                    if (done) "Granted" else "Required",
+                    fontSize = 12.sp,
+                    color = if (done) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error
+                )
+            }
         }
-        if (!granted) {
-            OutlinedButton(onClick = onGrant) { Text("Grant") }
-        }
+        OutlinedButton(onClick = onAction) { Text(actionLabel) }
     }
+}
+
+private fun isImeEnabled(context: Context): Boolean {
+    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+    val target = ComponentName(context, DictatorInputMethodService::class.java)
+    return imm.enabledInputMethodList.any { it.component == target }
 }

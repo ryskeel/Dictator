@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="?attr/colorSurfaceContainer"
+    android:paddingLeft="20dp"
+    android:paddingRight="20dp"
+    android:paddingTop="28dp"
+    android:paddingBottom="36dp">
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:visibility="gone"
+        android:text="" />
+
+    <com.example.dictator.WaveformView
+        android:id="@+id/waveform"
+        android:layout_width="match_parent"
+        android:layout_height="88dp"
+        android:layout_marginTop="12dp"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="28dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/cancel_button"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="56dp"
+            android:minWidth="100dp"
+            android:paddingLeft="24dp"
+            android:paddingRight="24dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="28dp"
+            android:text="Cancel"
+            android:textAppearance="?attr/textAppearanceLabelLarge" />
+
+        <Space
+            android:layout_width="12dp"
+            android:layout_height="match_parent" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/mic_button"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_weight="1"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            app:cornerRadius="28dp"
+            android:text="Stop"
+            android:textAppearance="?attr/textAppearanceLabelLarge"
+            android:contentDescription="Stop recording" />
+
+    </LinearLayout>
+
+</LinearLayout>
