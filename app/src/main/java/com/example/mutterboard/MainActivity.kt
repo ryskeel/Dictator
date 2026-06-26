@@ -5,9 +5,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
+import androidx.core.content.FileProvider
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -37,20 +39,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.mutterboard.ui.theme.MutterboardTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.io.File
 
 private const val REPO = "ryskeel/Mutterboard"
 private val GreenAccent = Color(0xFF2E7D32)
 private val BrandFont = FontFamily(Font(R.font.audiowide_regular))
 
+private data class ReleaseInfo(val tag: String, val htmlUrl: String, val apkUrl: String?)
+
 private sealed interface UpdateStatus {
     object Checking : UpdateStatus
     data class UpToDate(val version: String) : UpdateStatus
-    data class Available(val tag: String, val url: String) : UpdateStatus
+    data class Available(val release: ReleaseInfo) : UpdateStatus
     object Failed : UpdateStatus
+}
+
+private sealed interface DownloadState {
+    object Idle : DownloadState
+    data class Downloading(val progress: Float) : DownloadState
+    data class Ready(val file: File) : DownloadState
+    object Failed : DownloadState
 }
 
 class MainActivity : ComponentActivity() {
@@ -109,6 +122,8 @@ private fun SetupScreen(
     }
     var updateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Checking) }
     var updateCheckTick by remember { mutableStateOf(0) }
+    var downloadState by remember { mutableStateOf<DownloadState>(DownloadState.Idle) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(refreshTick) {
         hasMic = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -121,8 +136,28 @@ private fun SetupScreen(
         val latest = fetchLatestRelease(REPO)
         updateStatus = when {
             latest == null -> UpdateStatus.Failed
-            isNewer(latest.first, currentVersion) -> UpdateStatus.Available(latest.first, latest.second)
+            isNewer(latest.tag, currentVersion) -> UpdateStatus.Available(latest)
             else -> UpdateStatus.UpToDate(currentVersion)
+        }
+    }
+
+    fun startUpdate(release: ReleaseInfo) {
+        val apkUrl = release.apkUrl
+        if (apkUrl == null) {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.htmlUrl)))
+            return
+        }
+        scope.launch {
+            downloadState = DownloadState.Downloading(0f)
+            val file = downloadApk(context, apkUrl) { progress ->
+                downloadState = DownloadState.Downloading(progress)
+            }
+            if (file == null) {
+                downloadState = DownloadState.Failed
+            } else {
+                downloadState = DownloadState.Ready(file)
+                launchInstall(context, file)
+            }
         }
     }
 
@@ -200,11 +235,17 @@ private fun SetupScreen(
             Spacer(Modifier.height(12.dp))
             UpdatesCard(
                 status = updateStatus,
+                downloadState = downloadState,
                 currentVersion = currentVersion,
                 onOpen = { url ->
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 },
-                onCheck = { updateCheckTick++ }
+                onCheck = {
+                    downloadState = DownloadState.Idle
+                    updateCheckTick++
+                },
+                onUpdate = { release -> startUpdate(release) },
+                onInstall = { file -> launchInstall(context, file) }
             )
         }
     }
@@ -372,19 +413,54 @@ private fun CompletionBanner() {
 @Composable
 private fun UpdatesCard(
     status: UpdateStatus,
+    downloadState: DownloadState,
     currentVersion: String,
     onOpen: (String) -> Unit,
-    onCheck: () -> Unit
+    onCheck: () -> Unit,
+    onUpdate: (ReleaseInfo) -> Unit,
+    onInstall: (File) -> Unit
 ) {
     val releasesUrl = "https://github.com/$REPO/releases/latest"
-    val linkLabel: String
-    val linkUrl: String
-    if (status is UpdateStatus.Available) {
-        linkLabel = "Get it on GitHub"
-        linkUrl = status.url
-    } else {
-        linkLabel = "View on GitHub"
-        linkUrl = releasesUrl
+    val available = (status as? UpdateStatus.Available)?.release
+
+    // Title + subtitle: an active download takes priority over the check status.
+    val title: String
+    val titleColor: Color
+    val subtitle: String
+    when (downloadState) {
+        is DownloadState.Downloading -> {
+            title = "Downloading update…"
+            titleColor = Color.Unspecified
+            subtitle = "${(downloadState.progress * 100).toInt()}%"
+        }
+        is DownloadState.Ready -> {
+            title = "Update downloaded"
+            titleColor = GreenAccent
+            subtitle = "Tap Install to finish"
+        }
+        is DownloadState.Failed -> {
+            title = "Download failed"
+            titleColor = MaterialTheme.colorScheme.error
+            subtitle = "Tap Update to try again"
+        }
+        is DownloadState.Idle -> when (status) {
+            is UpdateStatus.Checking -> {
+                title = "Checking for updates…"; titleColor = Color.Unspecified
+                subtitle = "Version v${currentVersion.normalizedVersion()}"
+            }
+            is UpdateStatus.UpToDate -> {
+                title = "You're up to date"; titleColor = Color.Unspecified
+                subtitle = "Version v${currentVersion.normalizedVersion()}"
+            }
+            is UpdateStatus.Available -> {
+                title = "Update available"; titleColor = GreenAccent
+                subtitle = "v${currentVersion.normalizedVersion()} → v${status.release.tag.normalizedVersion()}"
+            }
+            is UpdateStatus.Failed -> {
+                title = "Couldn't check for updates"; titleColor = Color.Unspecified
+                subtitle = "Version v${currentVersion.normalizedVersion()}"
+            }
+        }
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -395,45 +471,45 @@ private fun UpdatesCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                when (status) {
-                    is UpdateStatus.Checking ->
-                        Text("Checking for updates…", fontWeight = FontWeight.Medium)
-                    is UpdateStatus.UpToDate ->
-                        Text("You're up to date", fontWeight = FontWeight.Medium)
-                    is UpdateStatus.Available -> Text(
-                        "Update available",
-                        fontWeight = FontWeight.Bold,
-                        color = GreenAccent
-                    )
-                    is UpdateStatus.Failed ->
-                        Text("Couldn't check for updates", fontWeight = FontWeight.Medium)
-                }
-
-                val versionLine = when (status) {
-                    is UpdateStatus.Available ->
-                        "v${currentVersion.normalizedVersion()} → v${status.tag.normalizedVersion()}"
-                    else -> "Version v${currentVersion.normalizedVersion()}"
-                }
                 Text(
-                    versionLine,
+                    title,
+                    fontWeight = if (titleColor == GreenAccent) FontWeight.Bold else FontWeight.Medium,
+                    color = titleColor
+                )
+                Text(
+                    subtitle,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                TextButton(
-                    onClick = { onOpen(linkUrl) },
-                    contentPadding = PaddingValues(vertical = 4.dp)
-                ) {
-                    Text(linkLabel)
+                if (downloadState is DownloadState.Idle) {
+                    val linkLabel = if (available != null) "Get it on GitHub" else "View on GitHub"
+                    val linkUrl = available?.htmlUrl ?: releasesUrl
+                    TextButton(
+                        onClick = { onOpen(linkUrl) },
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        Text(linkLabel)
+                    }
                 }
             }
 
             Spacer(Modifier.width(12.dp))
 
-            if (status is UpdateStatus.Checking) {
-                CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-            } else {
-                OutlinedButton(onClick = onCheck) { Text("Check now") }
+            when {
+                downloadState is DownloadState.Downloading ->
+                    CircularProgressIndicator(
+                        progress = { downloadState.progress },
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp
+                    )
+                downloadState is DownloadState.Ready ->
+                    FilledTonalButton(onClick = { onInstall(downloadState.file) }) { Text("Install") }
+                status is UpdateStatus.Checking ->
+                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                available != null ->
+                    FilledTonalButton(onClick = { onUpdate(available) }) { Text("Update") }
+                else ->
+                    OutlinedButton(onClick = onCheck) { Text("Check now") }
             }
         }
     }
@@ -455,7 +531,7 @@ private fun isNewer(latestTag: String, current: String): Boolean {
     return false
 }
 
-private suspend fun fetchLatestRelease(repo: String): Pair<String, String>? =
+private suspend fun fetchLatestRelease(repo: String): ReleaseInfo? =
     withContext(Dispatchers.IO) {
         runCatching {
             val request = Request.Builder()
@@ -467,11 +543,83 @@ private suspend fun fetchLatestRelease(repo: String): Pair<String, String>? =
                 val body = resp.body?.string() ?: return@use null
                 val json = JSONObject(body)
                 val tag = json.optString("tag_name")
-                val url = json.optString("html_url")
-                if (tag.isBlank()) null else tag to url
+                if (tag.isBlank()) return@use null
+                val htmlUrl = json.optString("html_url")
+                val assets = json.optJSONArray("assets")
+                var apkUrl: String? = null
+                if (assets != null) {
+                    for (i in 0 until assets.length()) {
+                        val asset = assets.getJSONObject(i)
+                        if (asset.optString("name").endsWith(".apk", ignoreCase = true)) {
+                            apkUrl = asset.optString("browser_download_url")
+                            break
+                        }
+                    }
+                }
+                ReleaseInfo(tag, htmlUrl, apkUrl)
             }
         }.getOrNull()
     }
+
+private suspend fun downloadApk(
+    context: Context,
+    url: String,
+    onProgress: (Float) -> Unit
+): File? = withContext(Dispatchers.IO) {
+    runCatching {
+        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
+        val file = File(dir, "mutterboard-update.apk")
+        val request = Request.Builder().url(url).build()
+        OkHttpClient().newCall(request).execute().use { resp ->
+            if (!resp.isSuccessful) return@use null
+            val body = resp.body ?: return@use null
+            val total = body.contentLength()
+            body.byteStream().use { input ->
+                file.outputStream().use { output ->
+                    val buffer = ByteArray(16 * 1024)
+                    var downloaded = 0L
+                    var lastPercent = -1
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        if (total > 0) {
+                            val percent = (downloaded * 100 / total).toInt()
+                            if (percent != lastPercent) {
+                                lastPercent = percent
+                                onProgress(percent / 100f)
+                            }
+                        }
+                    }
+                }
+            }
+            file
+        }
+    }.getOrNull()
+}
+
+private fun launchInstall(context: Context, file: File) {
+    // On Android 8+ the user must allow this app to install unknown apps.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+        !context.packageManager.canRequestPackageInstalls()
+    ) {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${context.packageName}")
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+        return
+    }
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    context.startActivity(
+        Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    )
+}
 
 private fun isImeEnabled(context: Context): Boolean {
     val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
