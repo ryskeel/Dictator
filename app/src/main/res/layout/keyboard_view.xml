@@ -8,7 +8,7 @@
     android:paddingLeft="20dp"
     android:paddingRight="20dp"
     android:paddingTop="28dp"
-    android:paddingBottom="36dp">
+    android:paddingBottom="56dp">
 
     <TextView
         android:id="@+id/status_text"

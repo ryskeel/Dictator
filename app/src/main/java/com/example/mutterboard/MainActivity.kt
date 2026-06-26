@@ -196,7 +196,6 @@ private fun SetupScreen(
             Spacer(Modifier.height(12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
                 StepRow(
-                    index = 1,
                     label = "Microphone permission",
                     done = hasMic,
                     doneText = "Granted",
@@ -206,17 +205,15 @@ private fun SetupScreen(
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 62.dp))
                 StepRow(
-                    index = 2,
                     label = "Enable keyboard",
                     done = imeEnabled,
                     doneText = "Enabled",
-                    actionLabel = "Open settings",
+                    actionLabel = "Enable",
                     showActionWhenDone = false,
                     onAction = onOpenImeSettings
                 )
                 HorizontalDivider(modifier = Modifier.padding(start = 62.dp))
                 StepRow(
-                    index = 3,
                     label = "Groq API key",
                     done = apiKey.isNotBlank(),
                     doneText = "Saved",
@@ -340,7 +337,7 @@ private fun SectionHeader(text: String) {
 }
 
 @Composable
-private fun StepBadge(index: Int, done: Boolean) {
+private fun StepBadge(done: Boolean) {
     val base = Modifier.size(24.dp).clip(CircleShape)
     val styled = if (done) {
         base.background(GreenAccent)
@@ -348,27 +345,18 @@ private fun StepBadge(index: Int, done: Boolean) {
         base.border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
     }
     Box(modifier = styled, contentAlignment = Alignment.Center) {
-        if (done) {
-            Icon(
-                imageVector = Icons.Rounded.Check,
-                contentDescription = "Done",
-                tint = Color.White,
-                modifier = Modifier.size(15.dp)
-            )
-        } else {
-            Text(
-                "$index",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
+        Icon(
+            imageVector = Icons.Rounded.Check,
+            contentDescription = if (done) "Done" else "Not done",
+            tint = if (done) Color.White
+            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier.size(15.dp)
+        )
     }
 }
 
 @Composable
 private fun StepRow(
-    index: Int,
     label: String,
     done: Boolean,
     doneText: String,
@@ -383,7 +371,7 @@ private fun StepRow(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        StepBadge(index, done)
+        StepBadge(done)
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(label, fontWeight = FontWeight.Medium)
