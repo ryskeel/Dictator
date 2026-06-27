@@ -219,7 +219,7 @@ private fun SetupScreen(
 
             Spacer(Modifier.height(32.dp))
 
-            SectionHeader("Setup")
+            SectionHeader("Device setup")
             Spacer(Modifier.height(12.dp))
             Card(modifier = Modifier.fillMaxWidth()) {
                 StepRow(
@@ -239,15 +239,6 @@ private fun SetupScreen(
                     showActionWhenDone = false,
                     onAction = onOpenImeSettings
                 )
-                HorizontalDivider(modifier = Modifier.padding(start = 62.dp))
-                StepRow(
-                    label = "Groq API key",
-                    done = apiKey.isNotBlank(),
-                    doneText = "Saved",
-                    actionLabel = if (apiKey.isBlank()) "Add" else "Edit",
-                    showActionWhenDone = true,
-                    onAction = { showKeyDialog = true }
-                )
             }
 
             if (allDone) {
@@ -261,9 +252,11 @@ private fun SetupScreen(
             Spacer(Modifier.height(12.dp))
             TranscriptionCard(
                 engine = engine,
+                apiKey = apiKey,
                 modelReady = modelReady,
                 modelProgress = modelProgress,
                 onSelectEngine = { selectEngine(it) },
+                onEditKey = { showKeyDialog = true },
                 onDownloadModel = { downloadModel() }
             )
 
@@ -433,74 +426,81 @@ private fun StepRow(
 @Composable
 private fun TranscriptionCard(
     engine: Engine,
+    apiKey: String,
     modelReady: Boolean,
     modelProgress: ParakeetModelManager.Progress?,
     onSelectEngine: (Engine) -> Unit,
+    onEditKey: () -> Unit,
     onDownloadModel: () -> Unit
 ) {
     val haptic = rememberTapHaptic()
     Card(modifier = Modifier.fillMaxWidth()) {
-        EngineRow(
+        EngineOption(
             label = "Cloud (Groq)",
             subtitle = "Fast, needs API key + internet",
             selected = engine == Engine.CLOUD,
             onSelect = { haptic(); onSelectEngine(Engine.CLOUD) }
-        )
+        ) {
+            if (apiKey.isBlank()) {
+                Text(
+                    "API key required",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(onClick = { haptic(); onEditKey() }) { Text("Add API key") }
+            } else {
+                Text("Key saved", fontSize = 12.sp, color = GreenAccent)
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(onClick = { haptic(); onEditKey() }) { Text("Edit key") }
+            }
+        }
         HorizontalDivider(modifier = Modifier.padding(start = 54.dp))
-        EngineRow(
+        EngineOption(
             label = "On-device (Parakeet)",
             subtitle = "Private, offline, English only",
             selected = engine == Engine.LOCAL,
             onSelect = { haptic(); onSelectEngine(Engine.LOCAL) }
-        )
-
-        if (engine == Engine.LOCAL) {
-            HorizontalDivider(modifier = Modifier.padding(start = 54.dp))
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                when {
-                    modelReady -> {
-                        Text("Model ready", fontWeight = FontWeight.Medium, color = GreenAccent)
+        ) {
+            when {
+                modelReady -> {
+                    Text("Model ready", fontSize = 12.sp, color = GreenAccent)
+                }
+                modelProgress is ParakeetModelManager.Progress.Downloading -> {
+                    Text("Downloading model…", fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { modelProgress.fraction },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${(modelProgress.fraction * 100).toInt()}%  ·  ~630 MB",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                modelProgress is ParakeetModelManager.Progress.Extracting -> {
+                    Text("Extracting model…", fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                else -> {
+                    Text(
+                        "Download required",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    if (modelProgress is ParakeetModelManager.Progress.Failed) {
                         Text(
-                            "Parakeet TDT 0.6B is installed on this device.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    modelProgress is ParakeetModelManager.Progress.Downloading -> {
-                        Text("Downloading model…", fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(
-                            progress = { modelProgress.fraction },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            "${(modelProgress.fraction * 100).toInt()}%  ·  ~630 MB",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    modelProgress is ParakeetModelManager.Progress.Extracting -> {
-                        Text("Extracting model…", fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(8.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    }
-                    else -> {
-                        Text(
-                            "Download required",
+                            modelProgress.message,
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.error
                         )
-                        if (modelProgress is ParakeetModelManager.Progress.Failed) {
-                            Text(
-                                modelProgress.message,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Button(onClick = { haptic(); onDownloadModel() }) {
-                            Text("Download model (~630 MB)")
-                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = { haptic(); onDownloadModel() }) {
+                        Text("Download model (~630 MB)")
                     }
                 }
             }
@@ -508,19 +508,25 @@ private fun TranscriptionCard(
     }
 }
 
+/**
+ * A radio-selectable engine row. When [selected], [content] is rendered beneath
+ * the subtitle — aligned under the label text and within the same tap group, so
+ * the option's requirement (API key / model download) reads as part of it.
+ */
 @Composable
-private fun EngineRow(
+private fun EngineOption(
     label: String,
     subtitle: String,
     selected: Boolean,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    content: @Composable () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onSelect() }
             .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
         RadioButton(selected = selected, onClick = onSelect)
         Spacer(Modifier.width(6.dp))
@@ -531,6 +537,10 @@ private fun EngineRow(
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (selected) {
+                Spacer(Modifier.height(12.dp))
+                content()
+            }
         }
     }
 }
