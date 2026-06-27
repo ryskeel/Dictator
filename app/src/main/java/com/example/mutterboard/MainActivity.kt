@@ -538,7 +538,7 @@ private fun EngineOption(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (selected) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(4.dp))
                 content()
             }
         }
