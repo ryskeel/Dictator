@@ -56,6 +56,19 @@ class WavRecorder(private val cacheDir: File) {
         peakAmplitude = 0
 
         record.startRecording()
+        // startRecording() can silently fail (e.g. the mic input is still busy
+        // right after switching into the IME) without throwing — it just leaves
+        // the recorder stopped and we'd capture pure silence. Verify and bail so
+        // the caller can retry instead of showing a dead waveform.
+        if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            Log.e(TAG, "startRecording did not enter RECORDING (state=${record.recordingState})")
+            try { record.stop() } catch (_: Exception) {}
+            record.release()
+            audioRecord = null
+            pcmFile = null
+            outputFile.delete()
+            return false
+        }
         capturing = true
 
         captureThread = Thread {

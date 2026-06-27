@@ -149,14 +149,26 @@ class MutterboardInputMethodService : InputMethodService() {
             renderState()
             return
         }
-        if (recorder.start()) {
-            state = State.RECORDING
-            renderState()
-            startWaveform()
-        } else {
-            state = State.ERROR
-            renderState()
+        if (!beginRecording()) {
+            // The mic input is sometimes briefly busy when switching into the
+            // IME, so the first start can fail. Retry once shortly before giving
+            // up, rather than leaving the user with a dead recording UI.
+            mainHandler.postDelayed({
+                if (state != State.RECORDING && !beginRecording()) {
+                    state = State.ERROR
+                    renderState()
+                }
+            }, START_RETRY_DELAY_MS)
         }
+    }
+
+    /** Attempts to start the recorder, updating UI on success. Returns false if it failed. */
+    private fun beginRecording(): Boolean {
+        if (!recorder.start()) return false
+        state = State.RECORDING
+        renderState()
+        startWaveform()
+        return true
     }
 
     private fun onMicTapped() {
@@ -323,5 +335,6 @@ class MutterboardInputMethodService : InputMethodService() {
         const val KEY_ENGINE = "engine"
         private const val STOP_BUFFER_MS = 800L
         private const val WAVEFORM_INTERVAL_MS = 50L
+        private const val START_RETRY_DELAY_MS = 250L
     }
 }
