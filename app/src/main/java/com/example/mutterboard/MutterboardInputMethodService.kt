@@ -223,7 +223,10 @@ class MutterboardInputMethodService : InputMethodService() {
             renderState()
             return
         }
-        currentInputConnection?.commitText(text, 1)
+        // Append a trailing space so you can keep typing — or dictate again —
+        // without manually hitting the space bar first. trimEnd() guards against
+        // a double space if the engine already returned trailing whitespace.
+        currentInputConnection?.commitText(text.trimEnd() + " ", 1)
         state = State.IDLE
         switchToPrevious()
     }
