@@ -46,12 +46,14 @@ class GroqRefiner(private val apiKey: String) {
      * text instead of dropping it.
      */
     fun refine(text: String, onResult: (String?) -> Unit) {
+        // Examples live inside the system prompt (not as prior user/assistant
+        // turns) and the transcript is the ONLY user turn. With multi-turn
+        // examples a small model treats the exchange as a conversation to
+        // continue and, on sparse/near-silent audio, will echo an example
+        // sentence verbatim instead of cleaning the real input. One user turn
+        // removes that failure mode.
         val messages = JSONArray().apply {
             put(message("system", SYSTEM_PROMPT))
-            for ((user, assistant) in FEW_SHOT) {
-                put(message("user", user))
-                put(message("assistant", assistant))
-            }
             put(message("user", text))
         }
         val payload = JSONObject().apply {
@@ -121,11 +123,17 @@ class GroqRefiner(private val apiKey: String) {
         private const val MODEL = "llama-3.1-8b-instant"
         private val JSON = "application/json; charset=utf-8".toMediaType()
 
+        // The examples are embedded here as labeled Input/Output pairs (see the
+        // note in refine() for why they aren't sent as conversation turns). The
+        // anti-echo / anti-invention rule is deliberately blunt because a small
+        // model is the one most likely to fabricate on sparse audio.
         private const val SYSTEM_PROMPT =
             "You clean up raw voice-dictation transcripts for a casual text-messaging " +
-                "keyboard. The text came from a speech-to-text model and may contain filler " +
-                "words, false starts, missing or wrong punctuation, and misheard words.\n\n" +
-                "Return ONLY the cleaned message. No preamble, no quotes, no explanation.\n\n" +
+                "keyboard. The user's message is the single user turn. The text came from a " +
+                "speech-to-text model and may contain filler words, false starts, missing or " +
+                "wrong punctuation, and misheard words.\n\n" +
+                "Return ONLY the cleaned version of that message. No preamble, no quotes, no " +
+                "explanation.\n\n" +
                 "Rules:\n" +
                 "- Remove fillers and disfluencies (um, uh, false starts, accidental repeats) " +
                 "and filler uses of \"like\", \"you know\", \"I mean\". Keep \"like\" or \"you know\" " +
@@ -139,23 +147,26 @@ class GroqRefiner(private val apiKey: String) {
                 "- It must read like a real person texting on their phone, never like an AI wrote " +
                 "it or like it was pasted from a document.\n" +
                 "- Only change a word when you are confident the speech model misheard it and the " +
-                "intended word is obvious from context (e.g. a homophone like \"Claude\" vs " +
-                "\"cloud\", or a name that doesn't fit). When unsure, leave it exactly as is.\n" +
-                "- If the text is already clean, return it unchanged.\n\n" +
-                "Output the cleaned message and nothing else."
-
-        // Locked few-shot set. For a small model these teach behavior far more
-        // reliably than the rules alone: (1) filler removal + a context homophone
-        // fix, (2) flatten a spoken list into comma form instead of bullets and
-        // drop a spoken "comma", (3) keep meaningful casual "like" and apostrophes
-        // while still cutting filler and fixing punctuation.
-        private val FEW_SHOT = listOf(
-            "um yeah i was thinking we could just like push this to the Claude tonight and uh see if it actually works" to
-                "Yeah I was thinking we could just push this to the cloud tonight and see if it actually works.",
-            "can you grab a few things from the store milk eggs bread and uh maybe some coffee too" to
-                "Can you grab a few things from the store. Milk, eggs, bread, and maybe some coffee too.",
-            "im running like ten minutes late sorry i got stuck behind this super slow truck on the highway" to
-                "I'm running like ten minutes late, sorry. I got stuck behind this super slow truck on the highway."
-        )
+                "intended word is obvious from context, e.g. a homophone, or a name or term that " +
+                "doesn't fit: \"Quad Code\" in a coding chat is \"Claude Code\", \"the Claude\" for " +
+                "storage is \"the cloud\". When unsure, leave it exactly as is.\n" +
+                "- CRITICAL: only clean up the exact message the user sent. Never add content that " +
+                "was not in it, and never output any of the example sentences below — they exist " +
+                "only to show the style. If the message is empty, only noise, or unintelligible, " +
+                "return it unchanged.\n\n" +
+                "Examples (each shows an Input and its cleaned Output):\n\n" +
+                "Input: um yeah i was thinking we could just like push this to the Claude tonight " +
+                "and uh see if it actually works\n" +
+                "Output: Yeah I was thinking we could just push this to the cloud tonight and see " +
+                "if it actually works.\n\n" +
+                "Input: can you grab a few things from the store milk eggs bread and uh maybe some " +
+                "coffee too\n" +
+                "Output: Can you grab a few things from the store. Milk, eggs, bread, and maybe " +
+                "some coffee too.\n\n" +
+                "Input: im running like ten minutes late sorry i got stuck behind this super slow " +
+                "truck on the highway\n" +
+                "Output: I'm running like ten minutes late, sorry. I got stuck behind this super " +
+                "slow truck on the highway.\n\n" +
+                "Now clean up the user's message and output only the result."
     }
 }
