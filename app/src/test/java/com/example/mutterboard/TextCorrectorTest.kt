@@ -65,4 +65,20 @@ class TextCorrectorTest {
         val out = TextCorrector.apply("openai gpt model", listOf("openai"))
         assertEquals("openai gpt model", out)
     }
+
+    @Test
+    fun doesNotSnapPhoneticallyCloseNgramThatLooksNothingAlike() {
+        // Real-world false positive: "floats on" joins to "floatson", which shares
+        // the coarse Soundex skeleton (F432) of "Fleetio Go" but differs in ~56% of
+        // its characters. The phonetic boost must not rewrite it.
+        val out = TextCorrector.apply("floats on your screen", listOf("Fleetio Go"))
+        assertEquals("floats on your screen", out)
+    }
+
+    @Test
+    fun stillCollapsesGenuineMultiWordArtifact() {
+        // Guard the fix doesn't over-correct: a close 2-word match still collapses.
+        val out = TextCorrector.apply("push it to charge b now", listOf("ChargeBee"))
+        assertEquals("push it to ChargeBee now", out)
+    }
 }
