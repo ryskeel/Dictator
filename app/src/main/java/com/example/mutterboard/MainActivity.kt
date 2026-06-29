@@ -595,9 +595,9 @@ private fun RefineRow(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("Clean up with AI", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            Text("Polish my text", fontWeight = FontWeight.Medium, fontSize = 14.sp)
             Text(
-                "Removes filler words and fixes the odd misheard word. Adds a moment of delay.",
+                "Fixes small slips so messages come out cleaner. Slightly slower.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
