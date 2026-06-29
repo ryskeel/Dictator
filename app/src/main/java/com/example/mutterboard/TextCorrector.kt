@@ -34,6 +34,18 @@ object TextCorrector {
     private const val MAX_CANDIDATE_LEN = 50
 
     /**
+     * Hard ceiling on the *raw* Levenshtein ratio, applied even when the candidate
+     * is a Soundex match. The phonetic boost ([findBestMatch]) multiplies the score
+     * by 0.3, which on its own lets a word differing in ~60% of its characters slip
+     * under [DEFAULT_THRESHOLD] purely because it shares a coarse Soundex skeleton —
+     * e.g. "floats on" -> "floatson" matching the vocab word "Fleetio Go" (both
+     * Soundex F432). Phonetics may *rank* candidates, but they must not rewrite a
+     * word that looks nothing like the target, so the spelling has to be at least
+     * this close regardless. Genuine corrections sit well under this (≤0.25).
+     */
+    private const val MAX_LEVENSHTEIN_RATIO = 0.34
+
+    /**
      * Returns [text] with custom-word corrections applied. [customWords] is the
      * user's vocabulary (original casing kept for the replacement); blank or empty
      * lists return the text untouched.
@@ -138,6 +150,10 @@ object TextCorrector {
             val levenshteinScore = if (maxLen > 0.0) {
                 levenshtein(candidate, target) / maxLen
             } else 1.0
+
+            // Even a phonetic match can't rescue a word whose spelling is this far
+            // off — guards against the Soundex boost rewriting unrelated words.
+            if (levenshteinScore > MAX_LEVENSHTEIN_RATIO) continue
 
             // A phonetic match cuts the score to 30%, strongly favouring it.
             val combined = if (soundexEquals(candidate, target)) {
