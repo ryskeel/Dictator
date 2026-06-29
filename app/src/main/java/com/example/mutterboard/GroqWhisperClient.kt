@@ -12,6 +12,16 @@ class GroqWhisperClient(private val apiKey: String) : Transcriber {
     private val client = OkHttpClient()
 
     /**
+     * Optional vocabulary hint passed to Whisper as the `prompt` field. Whisper
+     * biases its decoding toward terms that appear here, so the user's custom
+     * words (names, brands, jargon) come back spelled the way they expect. Set by
+     * the IME from the saved word list; null/blank means no hint. Volatile because
+     * it's updated from the main thread and read on an OkHttp worker thread.
+     */
+    @Volatile
+    var vocabularyPrompt: String? = null
+
+    /**
      * Open a pooled TLS connection to Groq ahead of the upload so the actual
      * transcription POST reuses an already-established connection instead of
      * paying the TCP+TLS handshake. Fired when recording starts; fire-and-forget,
@@ -37,6 +47,11 @@ class GroqWhisperClient(private val apiKey: String) : Transcriber {
             .addFormDataPart("model", "whisper-large-v3-turbo")
             .addFormDataPart("language", "en")
             .addFormDataPart("temperature", "0")
+            .apply {
+                vocabularyPrompt?.takeIf { it.isNotBlank() }?.let {
+                    addFormDataPart("prompt", it)
+                }
+            }
             .addFormDataPart(
                 "file",
                 audioFile.name,
