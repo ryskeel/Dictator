@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.*
@@ -171,6 +172,34 @@ private fun SetupScreen(
         prefs.edit().putBoolean(MutterboardInputMethodService.KEY_REFINE, enabled).apply()
     }
 
+    var customWords by remember {
+        mutableStateOf(
+            MutterboardInputMethodService.parseCustomWords(
+                prefs.getString(MutterboardInputMethodService.KEY_CUSTOM_WORDS, null)
+            )
+        )
+    }
+    var showAddWord by remember { mutableStateOf(false) }
+
+    fun saveCustomWords(words: List<String>) {
+        customWords = words
+        prefs.edit()
+            .putString(MutterboardInputMethodService.KEY_CUSTOM_WORDS, words.joinToString("\n"))
+            .apply()
+    }
+
+    fun addCustomWord(word: String) {
+        val cleaned = word.trim()
+        if (cleaned.isEmpty()) return
+        // Case-insensitive de-dupe so "Mutterboard" and "mutterboard" don't both stick.
+        if (customWords.any { it.equals(cleaned, ignoreCase = true) }) return
+        saveCustomWords(customWords + cleaned)
+    }
+
+    fun removeCustomWord(word: String) {
+        saveCustomWords(customWords.filterNot { it == word })
+    }
+
     fun downloadModel() {
         modelProgress = ParakeetModelManager.Progress.Downloading(0f)
         modelManager.download { p ->
@@ -306,6 +335,16 @@ private fun SetupScreen(
 
             Spacer(Modifier.height(40.dp))
 
+            SectionHeader("Vocabulary")
+            Spacer(Modifier.height(12.dp))
+            VocabularyCard(
+                words = customWords,
+                onAdd = { showAddWord = true },
+                onRemove = { removeCustomWord(it) }
+            )
+
+            Spacer(Modifier.height(40.dp))
+
             SectionHeader("Updates")
             Spacer(Modifier.height(12.dp))
             UpdatesCard(
@@ -380,6 +419,16 @@ private fun SetupScreen(
 
     if (showPrivacy) {
         PrivacyPolicyDialog(onDismiss = { showPrivacy = false })
+    }
+
+    if (showAddWord) {
+        AddWordDialog(
+            onDismiss = { showAddWord = false },
+            onAdd = { word ->
+                addCustomWord(word)
+                showAddWord = false
+            }
+        )
     }
 }
 
@@ -608,6 +657,107 @@ private fun RefineRow(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             onCheckedChange = { haptic(); onToggle(it) }
         )
     }
+}
+
+/**
+ * Custom vocabulary editor. The word list applies to both engines (it's fed to
+ * Whisper as a prompt on Cloud and fuzzy-matched against output on-device), so it
+ * lives in its own section rather than under either engine. Added words show as
+ * peach badges (matching the saved-key / model-ready rows); tapping the × removes.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun VocabularyCard(
+    words: List<String>,
+    onAdd: () -> Unit,
+    onRemove: (String) -> Unit
+) {
+    val haptic = rememberTapHaptic()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest
+        )
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                "Names or terms you want spelled your way.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (words.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    words.forEach { word ->
+                        WordBadge(word = word, onRemove = { haptic(); onRemove(word) })
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            Button(onClick = { haptic(); onAdd() }) { Text("Add word") }
+        }
+    }
+}
+
+/** A single custom word as a peach badge with a × to remove it. */
+@Composable
+private fun WordBadge(word: String, onRemove: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFFF8E6DA))
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+    ) {
+        Text(word, fontSize = 13.sp, color = Color.Black)
+        IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Remove $word",
+                tint = Color.Black,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddWordDialog(onDismiss: () -> Unit, onAdd: (String) -> Unit) {
+    val haptic = rememberTapHaptic()
+    var draft by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add a word") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Enter a name, brand, or term you want spelled a certain way — " +
+                        "like a person's name or an app you mention often.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { haptic(); onAdd(draft) },
+                enabled = draft.isNotBlank()
+            ) { Text("Add") }
+        },
+        dismissButton = {
+            TextButton(onClick = { haptic(); onDismiss() }) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable

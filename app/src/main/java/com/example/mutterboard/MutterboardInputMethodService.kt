@@ -31,6 +31,7 @@ class MutterboardInputMethodService : InputMethodService() {
     private var refiner: GroqRefiner? = null
     private var engine: Engine = Engine.CLOUD
     private var cloudKey: String = ""
+    private var customWords: List<String> = emptyList()
     private var modelManager: ParakeetModelManager? = null
 
     private var keyboardView: View? = null
@@ -58,6 +59,9 @@ class MutterboardInputMethodService : InputMethodService() {
     private fun refreshTranscriber() {
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val newEngine = Engine.fromPref(prefs.getString(KEY_ENGINE, Engine.CLOUD.prefValue))
+        // Custom vocabulary applies to both engines; re-read it every refresh so
+        // edits made in the app take effect the next time the keyboard appears.
+        customWords = parseCustomWords(prefs.getString(KEY_CUSTOM_WORDS, null))
         when (newEngine) {
             Engine.CLOUD -> {
                 val key = prefs.getString(KEY_API_KEY, "") ?: ""
@@ -66,6 +70,11 @@ class MutterboardInputMethodService : InputMethodService() {
                     transcriber?.close()
                     transcriber = if (key.isNotEmpty()) GroqWhisperClient(key) else null
                 }
+                // Bias Whisper toward the user's vocabulary via its prompt field.
+                // Set every refresh (not just on rebuild) so word-list edits apply
+                // even when the client itself was kept.
+                (transcriber as? GroqWhisperClient)?.vocabularyPrompt =
+                    customWords.joinToString(", ").ifBlank { null }
                 // The refiner is a cloud-only extra: rebuild it only when toggled
                 // on with a key present, or when the key changed, so it isn't
                 // reallocated every time the keyboard reappears.
@@ -242,16 +251,24 @@ class MutterboardInputMethodService : InputMethodService() {
             renderState()
             return
         }
+        // On-device transcription can't be biased toward the user's vocabulary,
+        // so fuzzy-correct the output against the custom word list here. The cloud
+        // path already biases Whisper via its prompt, so it's left untouched.
+        val corrected = if (engine == Engine.LOCAL && customWords.isNotEmpty()) {
+            TextCorrector.apply(text, customWords)
+        } else {
+            text
+        }
         // If the cloud refiner is on, run the cleanup pass before committing.
         // We stay in TRANSCRIBING (progress shown) during the extra round-trip,
         // and fall back to the raw text if it fails so the message is never lost.
         val r = refiner
         if (r != null) {
-            r.refine(text) { refined ->
-                mainHandler.post { commitAndFinish(refined ?: text) }
+            r.refine(corrected) { refined ->
+                mainHandler.post { commitAndFinish(refined ?: corrected) }
             }
         } else {
-            commitAndFinish(text)
+            commitAndFinish(corrected)
         }
     }
 
@@ -386,6 +403,16 @@ class MutterboardInputMethodService : InputMethodService() {
         const val KEY_API_KEY = "groq_api_key"
         const val KEY_ENGINE = "engine"
         const val KEY_REFINE = "refine_cloud"
+        // Custom vocabulary, stored as a newline-separated list of words/phrases.
+        const val KEY_CUSTOM_WORDS = "custom_words"
+
+        /** Parses the stored custom-words blob into a clean, de-duplicated list. */
+        fun parseCustomWords(raw: String?): List<String> =
+            raw.orEmpty()
+                .split("\n")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
         // Tail kept recording after Stop so the last word isn't clipped. Trimmed
         // from 800ms to cut latency; the appended trailing silence in the WAV
         // still gives the model a moment of run-off.
