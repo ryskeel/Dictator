@@ -191,6 +191,15 @@ private fun SetupScreen(
         prefs.edit().putBoolean(MutterboardInputMethodService.KEY_REFINE, enabled).apply()
     }
 
+    var shakeToStop by remember {
+        mutableStateOf(prefs.getBoolean(MutterboardInputMethodService.KEY_SHAKE_TO_STOP, false))
+    }
+
+    fun setShakeToStop(enabled: Boolean) {
+        shakeToStop = enabled
+        prefs.edit().putBoolean(MutterboardInputMethodService.KEY_SHAKE_TO_STOP, enabled).apply()
+    }
+
     var customWords by remember {
         mutableStateOf(
             MutterboardInputMethodService.parseCustomWords(
@@ -361,6 +370,15 @@ private fun SetupScreen(
                 words = customWords,
                 onAdd = { showAddWord = true },
                 onRemove = { removeCustomWord(it) }
+            )
+
+            Spacer(Modifier.height(40.dp))
+
+            SectionHeader("Gestures")
+            Spacer(Modifier.height(12.dp))
+            ShakeToStopCard(
+                enabled = shakeToStop,
+                onToggle = { setShakeToStop(it) }
             )
 
             Spacer(Modifier.height(40.dp))
@@ -676,6 +694,46 @@ private fun RefineRow(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             checked = enabled,
             onCheckedChange = { haptic(); onToggle(it) }
         )
+    }
+}
+
+/**
+ * Toggle for stopping a recording by shaking the phone, as an alternative to
+ * tapping Stop. Off by default; flipping it just writes the pref the IME reads
+ * the next time the keyboard appears. Engine-agnostic, so it gets its own card.
+ */
+@Composable
+private fun ShakeToStopCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val haptic = rememberTapHaptic()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { haptic(); onToggle(!enabled) }
+                .padding(16.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Shake to stop", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text(
+                    "While recording, a quick flick of the phone stops and transcribes — like tapping Stop.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Switch(
+                checked = enabled,
+                onCheckedChange = { haptic(); onToggle(it) }
+            )
+        }
     }
 }
 
