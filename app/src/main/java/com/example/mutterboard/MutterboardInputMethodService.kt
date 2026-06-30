@@ -44,6 +44,9 @@ class MutterboardInputMethodService : InputMethodService() {
     private var state: State = State.IDLE
     private var waveformAnimator: Runnable? = null
 
+    private var shakeToStop: Boolean = false
+    private val shakeDetector by lazy { ShakeDetector { onShakeDetected() } }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "IME onCreate")
@@ -62,6 +65,7 @@ class MutterboardInputMethodService : InputMethodService() {
         // Custom vocabulary applies to both engines; re-read it every refresh so
         // edits made in the app take effect the next time the keyboard appears.
         customWords = parseCustomWords(prefs.getString(KEY_CUSTOM_WORDS, null))
+        shakeToStop = prefs.getBoolean(KEY_SHAKE_TO_STOP, false)
         when (newEngine) {
             Engine.CLOUD -> {
                 val key = prefs.getString(KEY_API_KEY, "") ?: ""
@@ -160,6 +164,7 @@ class MutterboardInputMethodService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         if (state == State.RECORDING) {
+            shakeDetector.stop()
             recorder.cancel()
             stopWaveform()
             state = State.IDLE
@@ -181,6 +186,11 @@ class MutterboardInputMethodService : InputMethodService() {
             state = State.RECORDING
             renderState()
             startWaveform()
+            // Shake-to-stop is live only while recording, so a shake can never
+            // fire when there's nothing to stop and the sensor draws no power
+            // when idle. Callbacks land on mainHandler's thread (the same one
+            // driving the state machine), so onShakeDetected is safe to act on.
+            if (shakeToStop) shakeDetector.start(this, mainHandler)
             // Open the network connection now, while the user is still speaking,
             // so the upload at Stop rides an already-warm connection.
             transcriber?.warmUp()
@@ -202,8 +212,20 @@ class MutterboardInputMethodService : InputMethodService() {
         }
     }
 
+    /**
+     * A shake fired while recording: treat it exactly like tapping Stop. Guarded
+     * on RECORDING so a late callback (e.g. a shake mid-transcription) is ignored,
+     * and given a firmer haptic than a tap so the gesture is felt as confirmed.
+     */
+    private fun onShakeDetected() {
+        if (state != State.RECORDING) return
+        keyboardView?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        stopAndTranscribe()
+    }
+
     private fun onCancelTapped() {
         if (state == State.RECORDING) {
+            shakeDetector.stop()
             recorder.cancel()
             stopWaveform()
         }
@@ -212,6 +234,7 @@ class MutterboardInputMethodService : InputMethodService() {
     }
 
     private fun stopAndTranscribe() {
+        shakeDetector.stop()
         stopWaveform()
         state = State.TRANSCRIBING
         renderState()
@@ -390,6 +413,7 @@ class MutterboardInputMethodService : InputMethodService() {
     }
 
     override fun onDestroy() {
+        shakeDetector.stop()
         recorder.cancel()
         transcriber?.close()
         refiner?.close()
@@ -405,6 +429,8 @@ class MutterboardInputMethodService : InputMethodService() {
         const val KEY_REFINE = "refine_cloud"
         // Custom vocabulary, stored as a newline-separated list of words/phrases.
         const val KEY_CUSTOM_WORDS = "custom_words"
+        // When true, a shake while recording acts as Stop. Off by default.
+        const val KEY_SHAKE_TO_STOP = "shake_to_stop"
 
         /** Parses the stored custom-words blob into a clean, de-duplicated list. */
         fun parseCustomWords(raw: String?): List<String> =
