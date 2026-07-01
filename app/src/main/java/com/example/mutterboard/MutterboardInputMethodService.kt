@@ -14,6 +14,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.core.view.WindowCompat
 import com.google.android.material.button.MaterialButton
@@ -38,18 +39,12 @@ class MutterboardInputMethodService : InputMethodService() {
     private var statusText: TextView? = null
     private var micButton: MaterialButton? = null
     private var cancelButton: MaterialButton? = null
+    private var settingsButton: ImageButton? = null
     private var waveform: WaveformView? = null
     private var progress: LinearProgressIndicator? = null
 
     private var state: State = State.IDLE
     private var waveformAnimator: Runnable? = null
-
-    private var shakeToStop: Boolean = false
-    private val shakeDetector by lazy { ShakeDetector { onShakeDetected() } }
-    // Latched true once the recording's level crosses a speech threshold. Gates
-    // shake-to-stop so a shake only counts after the user has actually started
-    // talking ("talk to shake") — before that, a too-eager flick is ignored.
-    private var speechDetected: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -69,7 +64,6 @@ class MutterboardInputMethodService : InputMethodService() {
         // Custom vocabulary applies to both engines; re-read it every refresh so
         // edits made in the app take effect the next time the keyboard appears.
         customWords = parseCustomWords(prefs.getString(KEY_CUSTOM_WORDS, null))
-        shakeToStop = prefs.getBoolean(KEY_SHAKE_TO_STOP, false)
         when (newEngine) {
             Engine.CLOUD -> {
                 val key = prefs.getString(KEY_API_KEY, "") ?: ""
@@ -121,6 +115,7 @@ class MutterboardInputMethodService : InputMethodService() {
         statusText = view.findViewById(R.id.status_text)
         micButton = view.findViewById(R.id.mic_button)
         cancelButton = view.findViewById(R.id.cancel_button)
+        settingsButton = view.findViewById(R.id.settings_button)
         waveform = view.findViewById(R.id.waveform)
         progress = view.findViewById(R.id.progress)
 
@@ -131,6 +126,10 @@ class MutterboardInputMethodService : InputMethodService() {
         cancelButton?.setOnClickListener { v ->
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
             onCancelTapped()
+        }
+        settingsButton?.setOnClickListener { v ->
+            v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            onSettingsTapped()
         }
 
         applyNavigationBarStyling(themedContext)
@@ -168,7 +167,6 @@ class MutterboardInputMethodService : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         if (state == State.RECORDING) {
-            shakeDetector.stop()
             recorder.cancel()
             stopWaveform()
             state = State.IDLE
@@ -188,14 +186,8 @@ class MutterboardInputMethodService : InputMethodService() {
         }
         if (recorder.start()) {
             state = State.RECORDING
-            speechDetected = false
             renderState()
             startWaveform()
-            // Shake-to-stop is live only while recording, so a shake can never
-            // fire when there's nothing to stop and the sensor draws no power
-            // when idle. Callbacks land on mainHandler's thread (the same one
-            // driving the state machine), so onShakeDetected is safe to act on.
-            if (shakeToStop) shakeDetector.start(this, mainHandler)
             // Open the network connection now, while the user is still speaking,
             // so the upload at Stop rides an already-warm connection.
             transcriber?.warmUp()
@@ -217,22 +209,8 @@ class MutterboardInputMethodService : InputMethodService() {
         }
     }
 
-    /**
-     * A shake fired while recording: treat it exactly like tapping Stop. Guarded
-     * on RECORDING so a late callback (e.g. a shake mid-transcription) is ignored,
-     * and on [speechDetected] so the gesture only fires after the user has actually
-     * started talking — you have to "talk to shake." Given a firmer haptic than a
-     * tap so the gesture is felt as confirmed.
-     */
-    private fun onShakeDetected() {
-        if (state != State.RECORDING || !speechDetected) return
-        keyboardView?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-        stopAndTranscribe()
-    }
-
     private fun onCancelTapped() {
         if (state == State.RECORDING) {
-            shakeDetector.stop()
             recorder.cancel()
             stopWaveform()
         }
@@ -240,8 +218,24 @@ class MutterboardInputMethodService : InputMethodService() {
         switchToPrevious()
     }
 
+    /**
+     * Opens the app's settings and gets out of the way. Leaving for settings must
+     * never leave the mic hot, so we cancel any recording and hand control back to
+     * the user's previous keyboard — returning to a text field then takes a
+     * deliberate switch back to this keyboard (via the globe key) rather than
+     * silently reappearing and listening again.
+     */
+    private fun onSettingsTapped() {
+        if (state == State.RECORDING) {
+            recorder.cancel()
+            stopWaveform()
+        }
+        state = State.IDLE
+        openSetupActivity()
+        switchToPrevious()
+    }
+
     private fun stopAndTranscribe() {
-        shakeDetector.stop()
         stopWaveform()
         state = State.TRANSCRIBING
         renderState()
@@ -336,10 +330,6 @@ class MutterboardInputMethodService : InputMethodService() {
                 // Apply gain plus a sqrt (compressive) curve so quiet and normal
                 // speech register strongly while loud speech still has headroom.
                 val normalized = recorder.currentPeak() / 32767f
-                // Latch once the level clears the speech threshold; this is what
-                // arms shake-to-stop ("talk to shake"). We read it here because the
-                // animator already polls the peak every tick while recording.
-                if (normalized >= SPEECH_PEAK_THRESHOLD) speechDetected = true
                 val level = sqrt((normalized * WAVEFORM_GAIN).coerceIn(0f, 1f))
                 view.setLevel(level)
                 mainHandler.postDelayed(this, WAVEFORM_INTERVAL_MS)
@@ -424,7 +414,6 @@ class MutterboardInputMethodService : InputMethodService() {
     }
 
     override fun onDestroy() {
-        shakeDetector.stop()
         recorder.cancel()
         transcriber?.close()
         refiner?.close()
@@ -440,8 +429,6 @@ class MutterboardInputMethodService : InputMethodService() {
         const val KEY_REFINE = "refine_cloud"
         // Custom vocabulary, stored as a newline-separated list of words/phrases.
         const val KEY_CUSTOM_WORDS = "custom_words"
-        // When true, a shake while recording acts as Stop. Off by default.
-        const val KEY_SHAKE_TO_STOP = "shake_to_stop"
 
         /** Parses the stored custom-words blob into a clean, de-duplicated list. */
         fun parseCustomWords(raw: String?): List<String> =
@@ -458,10 +445,5 @@ class MutterboardInputMethodService : InputMethodService() {
         // Gain applied before the sqrt curve; ~0.25 normalized peak saturates
         // the bars, so normal speaking volume drives them near full height.
         private const val WAVEFORM_GAIN = 4f
-        // Normalized peak (0..1) the recording must clear for us to count it as
-        // "the user has started speaking" and arm shake-to-stop. Low enough that
-        // ordinary speaking volume trips it quickly, high enough to ignore room
-        // tone and quiet handling noise.
-        private const val SPEECH_PEAK_THRESHOLD = 0.06f
     }
 }

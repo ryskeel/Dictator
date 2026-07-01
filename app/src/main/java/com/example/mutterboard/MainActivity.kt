@@ -188,15 +188,6 @@ private fun SetupScreen(
         prefs.edit().putBoolean(MutterboardInputMethodService.KEY_REFINE, enabled).apply()
     }
 
-    var shakeToStop by remember {
-        mutableStateOf(prefs.getBoolean(MutterboardInputMethodService.KEY_SHAKE_TO_STOP, false))
-    }
-
-    fun setShakeToStop(enabled: Boolean) {
-        shakeToStop = enabled
-        prefs.edit().putBoolean(MutterboardInputMethodService.KEY_SHAKE_TO_STOP, enabled).apply()
-    }
-
     var customWords by remember {
         mutableStateOf(
             MutterboardInputMethodService.parseCustomWords(
@@ -358,15 +349,6 @@ private fun SetupScreen(
 
             Spacer(Modifier.height(40.dp))
 
-            SectionHeader("Gestures")
-            Spacer(Modifier.height(12.dp))
-            ShakeToStopCard(
-                enabled = shakeToStop,
-                onToggle = { setShakeToStop(it) }
-            )
-
-            Spacer(Modifier.height(40.dp))
-
             SectionHeader("Updates")
             Spacer(Modifier.height(12.dp))
             UpdatesCard(
@@ -514,9 +496,22 @@ private fun EngineInfoDialog(onDismiss: () -> Unit) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Cloud", fontWeight = FontWeight.Bold)
                     Text(
-                        "Your recording is sent to Groq's servers and transcribed " +
-                            "with OpenAI's Whisper model. Very fast and accurate, but " +
+                        "Your recording is sent to Groq and transcribed with OpenAI's " +
+                            "Whisper Large v3 Turbo model. Very fast and accurate, but " +
                             "it needs an internet connection and a free Groq API key.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Polish my text", fontWeight = FontWeight.Bold)
+                    Text(
+                        "An optional extra step for Cloud mode. After Whisper " +
+                            "transcribes your speech, the text is passed through Meta's " +
+                            "Llama 3.3 70B model (also on Groq), which tidies up the " +
+                            "phrasing and punctuation so it reads more naturally before " +
+                            "it's typed out. It keeps what you meant, just polished. " +
+                            "Needs an internet connection and adds a moment of delay.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -528,20 +523,6 @@ private fun EngineInfoDialog(onDismiss: () -> Unit) {
                             "Parakeet model. It works offline and your audio never " +
                             "leaves the device, but it's a bit slower, English-only, " +
                             "and needs a one-time ~630 MB model download.",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("LLM Enhanced", fontWeight = FontWeight.Bold)
-                    Text(
-                        "An optional extra step for Cloud mode. After your speech is " +
-                            "transcribed, the text is passed through a small cloud " +
-                            "language model that smooths out the wording, tidying " +
-                            "phrasing and punctuation so it reads more naturally " +
-                            "before it's typed out. It keeps what you meant, just " +
-                            "polished. Needs an internet connection and adds a moment " +
-                            "of delay.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -681,9 +662,9 @@ private fun RefineRow(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text("LLM Enhanced", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            Text("Polish my text", fontWeight = FontWeight.Medium, fontSize = 14.sp)
             Text(
-                "Cleans up dictated text.",
+                "(Recommended) cleans up dictation for best output.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -693,46 +674,6 @@ private fun RefineRow(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             checked = enabled,
             onCheckedChange = { haptic(); onToggle(it) }
         )
-    }
-}
-
-/**
- * Toggle for stopping a recording by shaking the phone, as an alternative to
- * tapping Stop. Off by default; flipping it just writes the pref the IME reads
- * the next time the keyboard appears. Engine-agnostic, so it gets its own card.
- */
-@Composable
-private fun ShakeToStopCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    val haptic = rememberTapHaptic()
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .clickable { haptic(); onToggle(!enabled) }
-                .padding(16.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Shake to stop", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                Text(
-                    "Once you've started speaking, a quick flick of the phone stops and transcribes — like tapping Stop.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Switch(
-                checked = enabled,
-                onCheckedChange = { haptic(); onToggle(it) }
-            )
-        }
     }
 }
 

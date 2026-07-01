@@ -7,8 +7,19 @@
     android:background="?attr/colorSurfaceContainer"
     android:paddingLeft="20dp"
     android:paddingRight="20dp"
-    android:paddingTop="28dp"
+    android:paddingTop="8dp"
     android:paddingBottom="56dp">
+
+    <ImageButton
+        android:id="@+id/settings_button"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginStart="-8dp"
+        android:padding="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_settings_gear"
+        android:scaleType="fitCenter"
+        android:contentDescription="Settings" />
 
     <TextView
         android:id="@+id/status_text"
